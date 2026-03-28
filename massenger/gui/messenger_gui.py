@@ -196,6 +196,7 @@ class MessengerGUI:
             self.root.maxsize(1920, 1080)
             self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+
             try:
                 icon_path = Path(__file__).parent / "icon.ico"
                 if icon_path.exists():
@@ -214,6 +215,7 @@ class MessengerGUI:
         self.current_chat: Optional[str] = None
         self.username: Optional[str] = None
         self.known_public_keys: Dict[str, str] = {}
+        self.sent_messages: Dict[str, str] = {}
 
         self.chat_listbox: Optional[tk.Listbox] = None
         self.messages_area: Optional[scrolledtext.ScrolledText] = None
@@ -228,6 +230,7 @@ class MessengerGUI:
         self.last_message_time: Dict[str, str] = {}
 
         self.download_dir = GUIConstants.DOWNLOAD_DIR
+
         try:
             self.download_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"📁 Директория загрузок: {self.download_dir}")
@@ -486,30 +489,43 @@ class MessengerGUI:
         self.client = client
         self.loop = loop
         self.username = username
+
+        # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: убеждаемся, что client.username установлен
+        if not self.client.username:
+            logger.warning(f"⚠️ client.username не установлен, исправляю...")
+            self.client.username = username
+
+        logger.info(f"✅ Клиент авторизован: {self.client.username}")
+
         self.client.message_callback = lambda msg: self._safe_callback(self.on_message, msg)
         self.client.file_callback = lambda info: self._safe_callback(self.on_file_received, info)
+
         try:
             self.known_public_keys[username] = client.crypto.get_public_key_pem()
             logger.info("🔑 Публичный ключ сохранён")
         except Exception as e:
             logger.warning(f"⚠️ Не удалось получить публичный ключ: {e}")
+
         for widget in self.root.winfo_children():
             if isinstance(widget, tk.Toplevel):
                 try:
                     widget.destroy()
                 except Exception as e:
                     logger.warning(f"⚠️ Ошибка при закрытии окна входа: {e}")
+
         try:
             self.setup_main_ui()
             logger.info("✅ Основной интерфейс создан")
         except Exception as e:
             logger.error(f"❌ Ошибка при создании интерфейса: {e}", exc_info=True)
             return
+
         try:
             self._fetch_contact_public_keys()
             self.refresh_contacts()
         except Exception as e:
             logger.warning(f"⚠️ Не удалось загрузить контакты/ключи: {e}")
+
         self.show_status(f"👋 Добро пожаловать, {username}!")
         self._start_auto_refresh()
 
@@ -761,13 +777,24 @@ class MessengerGUI:
                         self.messages_area.insert(tk.END, "   ⚠️ Файл недоступен\n", "error")
                     self.messages_area.insert(tk.END, "\n\n")
                 else:
-                    msg_id = m.get('id')  # получаем ID сообщения
+                    # Чужие или свои сообщения
+                    msg_id = m.get('id')  # ← ← ← ИЗВЛЕЧЬ msg_id ПЕРЕД использованием!
+
                     if m.get('is_own', False):
-                        # Свои сообщения
-                        if msg_id and msg_id in self.sent_messages:
-                            text = self.sent_messages[msg_id]
+                        # Свои сообщения — проверяем с приведением типов
+                        if msg_id is not None:
+                            # Пробуем найти по строковому ключу (как сохраняется при отправке)
+                            msg_id_str = str(msg_id)
+                            if msg_id_str in self.sent_messages:
+                                text = self.sent_messages[msg_id_str]
+                            elif msg_id in self.sent_messages:  # На случай, если ключ числовой
+                                text = self.sent_messages[msg_id]
+                            else:
+                                text = m.get('text', m.get('encrypted_data', '🔒 Зашифрованное сообщение'))
+                                logger.debug(
+                                    f"⚠️ Сообщение не найдено в кэше: msg_id={msg_id} (type={type(msg_id).__name__})")
                         else:
-                            text = "🔒 Зашифрованное сообщение"
+                            text = m.get('text', m.get('encrypted_data', '🔒 Зашифрованное сообщение'))
                         self.messages_area.insert(tk.END, f"[{ts}] Вы:\n{text}\n\n", "own")
                     else:
                         # Чужие сообщения
@@ -780,13 +807,8 @@ class MessengerGUI:
                                 else:
                                     text = "⚠️ Нет ключа"
                             except Exception as e:
-                                text = "⚠️ Не расшифровано"
+                                text = f"⚠️ Не расшифровано: {str(e)[:50]}"
                         self.messages_area.insert(tk.END, f"[{ts}] {m.get('sender')}:\n{text}\n\n", "other")
-                if self.current_chat and last_timestamp:
-                    self.last_message_time[self.current_chat] = last_timestamp
-            logger.info(f"✅ Отображено {len(msgs)} сообщений, {file_count} файлов")
-        self.messages_area.config(state=tk.DISABLED)
-        self.messages_area.see(tk.END)
 
     def _download_file_by_id(self, file_id: str, filename: str, sender: str) -> None:
         save_path = filedialog.asksaveasfilename(defaultextension=".*", initialfile=filename,
@@ -828,51 +850,100 @@ class MessengerGUI:
             else:
                 messagebox.showwarning("Предупреждение", "Выберите контакт для отправки сообщения")
             return
+
         logger.info(f"📤 Отправка сообщения для {self.current_chat}")
         self.display_new_message("Вы", text, status="sending")
         self.message_entry.delete(0, tk.END)
 
         def _send() -> None:
             try:
+                # 🔑 1. Получаем публичный ключ получателя
                 recipient_public_key = self.known_public_keys.get(self.current_chat)
-                if not recipient_public_key:
-                    recipient_public_key = self._run_async(self.client.get_public_key(self.current_chat),
-                                                           timeout=GUIConstants.TIMEOUT_SHORT)
-                    if recipient_public_key:
-                        self.known_public_keys[self.current_chat] = recipient_public_key
-                encrypted_data = self.client.crypto.encrypt_message(text,
-                                                                    recipient_public_key) if recipient_public_key else text
-                if not recipient_public_key:
-                    logger.warning("⚠️ Отправка без шифрования (нет ключа)")
 
-                # Отправка с ожиданием ответа (возвращает словарь)
+                if not recipient_public_key:
+                    logger.info(f"🔑 Ключ не в кэше, запрашиваю у сервера для {self.current_chat}")
+                    recipient_public_key = self._run_async(
+                        self.client.get_public_key(self.current_chat),
+                        timeout=GUIConstants.TIMEOUT_SHORT
+                    )
+                    logger.debug(
+                        f"🔍 get_public_key вернул: {type(recipient_public_key)}, len={len(recipient_public_key) if recipient_public_key else 0}")
+
+                    if recipient_public_key and self.client.crypto._validate_public_key(recipient_public_key):
+                        self.known_public_keys[self.current_chat] = recipient_public_key
+                        logger.info(f"✅ Ключ получен и сохранён для {self.current_chat}")
+                    else:
+                        logger.error(f"❌ Не удалось получить/валидировать ключ для {self.current_chat}")
+                        self.root.after(0, lambda: self.show_error(f"Нет ключа шифрования для {self.current_chat}"))
+                        return
+
+                # 🔐 2. Шифруем сообщение
+                logger.debug(f"🔐 Шифрую сообщение ({len(text)} символов) ключом ({len(recipient_public_key)} символов)")
+                try:
+                    encrypted_data = self.client.crypto.encrypt_message(text, recipient_public_key)
+                    logger.debug(f"✅ encrypt_message вернул: {len(encrypted_data) if encrypted_data else 0} символов")
+                except Exception as encrypt_err:
+                    logger.error(f"❌ encrypt_message упал: {type(encrypt_err).__name__}: {encrypt_err}", exc_info=True)
+                    self.root.after(0, lambda: self.show_error(f"Ошибка шифрования: {str(encrypt_err)[:50]}"))
+                    return
+
+                if not encrypted_data:
+                    logger.error("❌ encrypted_data пустой после шифрования!")
+                    self.root.after(0, lambda: self.show_error("Ошибка: пустые данные после шифрования"))
+                    return
+
+                # 📤 3. Проверяем соединение перед отправкой
+                if not self.client or not self.client.connected:
+                    logger.error("❌ Нет активного соединения с сервером")
+                    self.root.after(0, lambda: self.show_error("Нет соединения с сервером"))
+                    return
+
+                logger.debug(f"📤 Вызываю client.send_message (connected={self.client.connected})")
+
+                # 4. Отправляем через клиент
                 response = self._run_async(
                     self.client.send_message(self.current_chat, encrypted_data),
                     timeout=GUIConstants.TIMEOUT_NORMAL
                 )
 
-                if response and response.get('success'):
-                    message_id = response.get('message_id')
+                logger.debug(f"📥 client.send_message вернул: {response}")
+
+                # ✅ 5. Обработка ответа
+                if response and response.get("success"):
+                    message_id = response.get("message_id")
                     if message_id:
-                        # Сохраняем текст сообщения в словарь по ID
-                        self.root.after(0, lambda: self._store_sent_message(message_id, text))
+                        self.root.after(0, lambda: self._store_sent_message(str(message_id), text))
                     self.root.after(0, lambda: self.display_new_message("Вы", text, status="sent"))
+                    logger.info(f"✅ Сообщение отправлено успешно: {message_id}")
+                elif response is None:
+                    logger.error("❌ send_message вернул None (таймаут или ошибка соединения)")
+                    self.root.after(0, lambda: self.show_error("Таймаут или ошибка соединения"))
                 else:
-                    self.root.after(0, lambda: self.show_error("Не удалось отправить"))
+                    logger.error(f"❌ Сервер ответил с ошибкой: {response}")
+                    error_msg = response.get("message", "Неизвестная ошибка")
+                    self.root.after(0, lambda: self.show_error(f"Ошибка сервера: {error_msg}"))
+
             except asyncio.TimeoutError:
-                logger.error("⏰ Таймаут отправки сообщения")
+                logger.error("⏰ Таймаут операции отправки")
                 self.root.after(0, lambda: self.show_error("Таймаут отправки"))
+            except ValueError as e:
+                logger.error(f"❌ Ошибка криптографии: {e}", exc_info=True)
+                self.root.after(0, lambda: self.show_error(f"Ошибка шифрования: {str(e)[:50]}"))
             except Exception as e:
-                logger.error(f"❌ Ошибка отправки: {e}", exc_info=True)
-                self.root.after(0, lambda: self.show_error("Не удалось отправить"))
+                logger.error(f"❌ Ошибка в _send: {type(e).__name__}: {e}", exc_info=True)
+                self.root.after(0, lambda: self.show_error(f"Не удалось отправить: {str(e)[:50]}"))
 
         threading.Thread(target=_send, daemon=True).start()
 
-    def _store_sent_message(self, message_id: int, text: str) -> None:
+    def _store_sent_message(self, message_id: str, text: str) -> None:
         """Сохраняет отправленный текст сообщения по его ID."""
-        self.sent_messages[message_id] = text
-
-        threading.Thread(target=_send, daemon=True).start()
+        # Безопасная инициализация на всякий случай
+        if not hasattr(self, 'sent_messages'):
+            self.sent_messages = {}
+        # message_id приходит как строка (UUID), не как int
+            msg_id_str = str(message_id)
+            self.sent_messages[msg_id_str] = text
+            logger.debug(f"💾 Сообщение сохранено в кэш: msg_id={msg_id_str[:8]}...")
 
     def attach_file(self) -> None:
         if not self.current_chat:

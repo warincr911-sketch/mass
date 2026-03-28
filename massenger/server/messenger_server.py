@@ -15,6 +15,10 @@ import uuid
 import signal
 import re
 import aiofiles
+import logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('messenger_server')
+
 from datetime import datetime, timezone
 from typing import Dict, Optional, List, Any
 from pathlib import Path
@@ -410,9 +414,14 @@ class MessengerServer:
     # 📬 СООБЩЕНИЯ
     # ========================================================================
     async def handle_message(self, websocket: websockets.WebSocketServerProtocol,
-                             data: dict, authenticated_username: Optional[str],
+                             data: dict,
+                             authenticated_username: Optional[str],
                              request_id: Optional[str] = None) -> None:
-        """Отправка сообщения"""
+        """Отправка сообщения — ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+
+
+        logger.debug(f"📥 handle_message: from={authenticated_username}, to={data.get('recipient')}")
+
         if not authenticated_username:
             await self._send_error(websocket, 'Требуется авторизация', request_id)
             return
@@ -421,13 +430,15 @@ class MessengerServer:
         encrypted_data = data.get('encrypted_data')
 
         if not recipient or not encrypted_data:
+            logger.warning(
+                f"⚠️ Неверные параметры: recipient={recipient}, encrypted_data={'present' if encrypted_data else 'missing'}")
             await self._send_error(websocket, 'Отсутствуют параметры', request_id)
             return
 
         try:
             loop = asyncio.get_event_loop()
 
-            # ✅ ИСПРАВЛЕНИЕ #2: БД в executor
+            # Получение пользователей
             sender_user = await loop.run_in_executor(
                 self._db_executor,
                 lambda: self.db.get_user_by_username(authenticated_username)
@@ -438,10 +449,11 @@ class MessengerServer:
             )
 
             if not sender_user or not recipient_user:
+                logger.warning(f"⚠️ Пользователь не найден: sender={authenticated_username}, recipient={recipient}")
                 await self._send_error(websocket, 'Пользователь не найден', request_id)
                 return
 
-            # Сохранение в БД
+            # ✅ Сохранение в БД — ТОЛЬКО ОДИН РАЗ
             message_id = await loop.run_in_executor(
                 self._db_executor,
                 lambda: self.db.save_message(
@@ -450,41 +462,42 @@ class MessengerServer:
                     encrypted_data
                 )
             )
+            logger.debug(f"💾 Сообщение сохранено: id={message_id}")
 
-            await loop.run_in_executor(
-                self._db_executor,
-                lambda: self.db.save_message(
-                    sender_user['id'],
-                    recipient_user['id'],
-                    encrypted_data
-                )
-            )
-
-            # Уведомление получателю
+            # ✅ Уведомление получателю — БЕЗОПАСНОЕ
             if recipient in self.clients:
                 try:
-                    await self.clients[recipient].send(json.dumps({
+                    recipient_ws = self.clients[recipient]
+                    await recipient_ws.send(json.dumps({
                         'type': 'new_message',
                         'sender': authenticated_username,
                         'encrypted_data': encrypted_data,
                         'timestamp': datetime.now(timezone.utc).isoformat()
-                    }))
-                    logger.info(f"📤 Сообщение отправлено: {recipient}")
+                    }, ensure_ascii=False))
+                    logger.info(f"📤 Уведомление отправлено: {recipient}")
                 except websockets.exceptions.ConnectionClosed:
-                    logger.warning(f"⚠️ Получатель {recipient} отключился")
+                    logger.warning(f"⚠️ Получатель {recipient} отключился (удаление из clients)")
+                    # Безопасное удаление
+                    self.clients.pop(recipient, None)
+                except KeyError:
+                    logger.warning(f"⚠️ Получатель {recipient} не найден в self.clients")
                 except Exception as e:
-                    logger.error(f"❌ Не удалось отправить: {e}")
+                    logger.error(f"❌ Не удалось уведомить {recipient}: {type(e).__name__}: {e}")
 
+            # ✅ Отправка ответа отправителю
             await self._send_response(websocket, {
                 'type': 'message_sent',
                 'success': True,
                 'message_id': message_id
             }, request_id)
+            logger.debug(f"✅ Ответ отправлен: {authenticated_username}")
 
+        except KeyError as e:
+            logger.error(f"❌ KeyError в handle_message: {e}", exc_info=True)
+            await self._send_error(websocket, f'Внутренняя ошибка: {str(e)}', request_id)
         except Exception as e:
-            logger.error(f"❌ Ошибка обработки сообщения: {e}", exc_info=True)
-            await self._send_error(websocket, 'Ошибка обработки сообщения', request_id)
-
+            logger.error(f"❌ Ошибка в handle_message: {type(e).__name__}: {e}", exc_info=True)
+            await self._send_error(websocket, f'Ошибка сервера: {str(e)[:100]}', request_id)
     # ========================================================================
     # 📁 ФАЙЛЫ
     # ========================================================================

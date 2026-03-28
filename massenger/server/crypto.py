@@ -91,3 +91,13 @@ class CryptoManager:
     def generate_salt(self) -> str:
         """Генерация случайной соли"""
         return base64.b64encode(os.urandom(self.salt_length)).decode('ascii')
+
+    def _validate_public_key(key: str) -> bool:
+        """Проверка формата публичного ключа (PEM)"""
+        if not key or not isinstance(key, str):
+            return False
+        return (
+                "-----BEGIN PUBLIC KEY-----" in key and
+                "-----END PUBLIC KEY-----" in key and
+                len(key) >= 400
+        )
