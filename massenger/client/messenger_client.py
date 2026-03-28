@@ -339,14 +339,20 @@ class MessengerClient:
 
     # ==================== Отправка сообщений ====================
     async def send_message(self, recipient: str, encrypted_data: str) -> Optional[Dict]:  # ✅ ИСПРАВЛЕНО
+        logger.debug(f"🔍 send_message: self.username={self.username}, type={type(self.username)}")
+        logger.debug(f"🔍 send_message: recipient={recipient}, type={type(recipient)}")
+        logger.debug(
+            f"🔍 send_message: encrypted_data type={type(encrypted_data)}, len={len(encrypted_data) if encrypted_data else 0}")
+
         if not self.username:
-            logger.error("❌ Отправка без авторизации")
-            return None
+            logger.error(f"❌ send_message: invalid recipient format: '{recipient}'")
+            logger.error(f"   Pattern: {ClientConstants.USERNAME_PATTERN}")
+
         if not self._validate_username(recipient):
             logger.error("❌ Неверный формат получателя")
             return None
         if not encrypted_data:
-            logger.error("❌ Пустые данные сообщения")
+            logger.error("❌ send_message: encrypted_data is None or empty")
             return None
 
         data = {
@@ -355,20 +361,15 @@ class MessengerClient:
             'encrypted_data': encrypted_data,
             'timestamp': datetime.now().isoformat()
         }
-        return await self._send_and_wait(data, timeout=ClientConstants.TIMEOUT_REQUEST_NORMAL)
 
-        try:
-            await self.websocket.send(json.dumps({
-                'type': 'message',
-                'recipient': recipient,
-                'encrypted_data': encrypted_data,
-                'timestamp': datetime.now().isoformat()
-            }))
-            logger.debug(f"📤 Сообщение отправлено для {recipient}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки: {e}", exc_info=True)
-            return False
+        logger.debug(f"🔍 send_message: пакет сформирован, вызываю _send_and_wait")
+
+        # ✅ ОТПРАВКА (единственный возврат)
+        response = await self._send_and_wait(data, timeout=ClientConstants.TIMEOUT_REQUEST_NORMAL)
+
+        logger.debug(f"🔍 send_message: _send_and_wait вернул: {response}")
+
+        return response
 
     # ==================== Цикл получения ====================
     async def _receive_loop(self) -> None:
@@ -379,17 +380,22 @@ class MessengerClient:
                     msg_type = data.get('type')
                     logger.debug(f"📥 Получен тип сообщения: {msg_type}")
 
-                    if msg_type == 'new_message':
+                    # ✅ КРИТИЧЕСКОЕ: обработка ответов на запросы
+                    if 'request_id' in data:
+                        request_id = data.get('request_id')
+                        if request_id in self._pending_requests:
+                            logger.debug(f"✅ Ответ на запрос #{request_id[:8]}...")
+                            self._pending_requests[request_id].set_result(data)
+                        else:
+                            logger.warning(f"⚠️ request_id {request_id[:8]}... не найден в pending")
+
+                    # Обработка событий (new_message, file_notification, etc.)
+                    elif msg_type == 'new_message':
                         if self.message_callback:
                             asyncio.create_task(self._safe_callback(self.message_callback, data))
                     elif msg_type == 'file_notification':
-                        logger.info(f"📁 Получено уведомление о файле: {data.get('filename')}")
                         if self.file_callback:
                             asyncio.create_task(self._safe_callback(self.file_callback, data))
-                    elif 'request_id' in data:
-                        request_id = data.get('request_id')
-                        if request_id in self._pending_requests:
-                            self._pending_requests[request_id].set_result(data)
 
                 except json.JSONDecodeError as e:
                     logger.error(f"❌ Ошибка парсинга JSON: {e}")
@@ -591,6 +597,11 @@ class MessengerClient:
         return None
 
     async def _send_and_wait(self, data: dict, timeout: float = 10) -> Optional[dict]:
+        """Отправка запроса и ожидание ответа от сервера"""
+
+        # ✅ Логирование для отладки
+        logger.debug(f"🔍 _send_and_wait: connected={self.connected}, websocket={self.websocket is not None}")
+
         if hasattr(self, '_loop_ready') and not self._loop_ready.is_set():
             try:
                 await asyncio.wait_for(self._loop_ready.wait(), timeout=2)
@@ -598,11 +609,10 @@ class MessengerClient:
                 logger.warning("⚠️ Таймаут ожидания готовности loop")
 
         if not self.connected or not self.websocket:
-            logger.error("❌ Нет активного соединения")
+            logger.error("❌ Нет активного соединения (_send_and_wait)")
             return None
 
         request_id = str(uuid.uuid4())
-        # ✅ Санитизация перед логированием
         logger.debug(f"📤 Запрос #{request_id}: {data.get('type')} | {_sanitize_for_log(data)}")
 
         data['request_id'] = request_id
@@ -611,16 +621,22 @@ class MessengerClient:
         self._pending_requests[request_id] = future
 
         try:
+            logger.debug(f"📡 Отправка WebSocket: {len(json.dumps(data))} байт")
             await self.websocket.send(json.dumps(data))
-            return await asyncio.wait_for(future, timeout)
+
+            logger.debug(f"⏳ Ожидание ответа (timeout={timeout}s)...")
+            response = await asyncio.wait_for(future, timeout)
+            logger.debug(f"✅ Ответ получен: {response.get('type', 'unknown')}")
+            return response
+
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ Таймаут запроса #{request_id}")
+            logger.warning(f"⏰ Таймаут запроса #{request_id} ({data.get('type')})")
             return None
-        except websockets.exceptions.ConnectionClosed:
-            logger.error("🔌 Соединение закрыто во время запроса")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.error(f"🔌 Соединение закрыто во время запроса: {e}")
             return None
         except Exception as e:
-            logger.error(f"❌ Ошибка запроса: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка запроса #{request_id}: {type(e).__name__}: {e}", exc_info=True)
             return None
         finally:
             self._pending_requests.pop(request_id, None)
