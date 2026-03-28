@@ -1,0 +1,47 @@
+2026-03-28 18:02:47 - messenger_server - INFO - ✅ aiofiles доступен — асинхронная работа с файлами
+2026-03-28 18:02:47 - messenger_server - INFO - ✅ Сервер инициализирован
+2026-03-28 18:02:47 - messenger_server - INFO - 🚀 Сервер запущен на ws://localhost:8765
+2026-03-28 18:02:59 - messenger_server - ERROR - ❌ Ошибка отправлена клиенту: Неверное имя или пароль
+2026-03-28 18:03:05 - messenger_server - ERROR - ❌ Ошибка отправлена клиенту: Неверное имя или пароль
+2026-03-28 18:03:08 - messenger_server - INFO - ✅ Пользователь dik успешно зарегистрирован
+2026-03-28 18:03:09 - messenger_server - INFO - ✅ Пользователь dik успешно вошёл в систему
+2026-03-28 18:03:33 - messenger_server - INFO - ✅ Пользователь suk успешно зарегистрирован
+2026-03-28 18:03:35 - messenger_server - INFO - ✅ Пользователь suk успешно вошёл в систему
+2026-03-28 18:03:39 - messenger_server - INFO - 🔌 Клиент отключился: sent 1011 (internal error) keepalive ping timeout; no close frame received
+2026-03-28 18:03:45 - messenger_server - INFO - 🔌 Клиент отключился: sent 1011 (internal error) keepalive ping timeout; no close frame received
+2026-03-28 18:03:48 - messenger_server - INFO - 🔌 Клиент отключился: sent 1011 (internal error) keepalive ping timeout; no close frame received
+2026-03-28 18:03:50 - messenger_server - INFO - 📋 История отправлена: 0 элементов для dik
+2026-03-28 18:03:52 - messenger_server - INFO - 📤 Сообщение отправлено: suk
+2026-03-28 18:03:52 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:03:55 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:03:58 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:01 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:04 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:07 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:10 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:13 - messenger_server - INFO - 🔌 Клиент отключился: sent 1011 (internal error) keepalive ping timeout; no close frame received
+2026-03-28 18:04:13 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:17 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:20 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:23 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:26 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:29 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:32 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:35 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:38 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:41 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:44 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:47 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:50 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:53 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:56 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:04:59 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:02 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:05 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:08 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:11 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:12 - messenger_server - INFO - 🔌 Клиент отключился: no close frame received or sent
+2026-03-28 18:05:12 - messenger_server - INFO - 👋 Пользователь suk вышел из системы
+2026-03-28 18:05:14 - messenger_server - INFO - 📋 История отправлена: 2 элементов для dik
+2026-03-28 18:05:14 - messenger_server - INFO - 🔌 Клиент отключился: no close frame received or sent
+2026-03-28 18:05:14 - messenger_server - INFO - 👋 Пользователь dik вышел из системы
