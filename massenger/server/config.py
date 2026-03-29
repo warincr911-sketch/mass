@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Конфигурация сервера"""
 
-import os
+
 from pathlib import Path
 
 class Config:

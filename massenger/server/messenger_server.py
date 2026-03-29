@@ -7,28 +7,28 @@ Messenger Server — Асинхронный сервер для Secure Messenger
 import asyncio
 import websockets
 import json
-import logging
+
 import sys
 import os
 import base64
 import uuid
 import signal
 import re
-import aiofiles
+
 import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('messenger_server')
 
 from datetime import datetime, timezone
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, Any
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.database import DatabaseManager
-from server.crypto import CryptoManager
-from server.config import Config
+from massenger.server.database import DatabaseManager
+from massenger.server.crypto import CryptoManager
+from massenger.server.config import Config
 
 
 # ============================================================================
@@ -62,7 +62,7 @@ class ServerConstants:
 # ============================================================================
 def _sanitize_for_log(data: Dict[str, Any]) -> Dict[str, Any]:
     """Удаляет чувствительные данные перед логированием"""
-    sensitive = {'password', 'encrypted_data', 'private_key', 'encrypted_key'}
+    sensitive = {'password', 'private_key'}
     result = {}
     for k, v in data.items():
         if k in sensitive:

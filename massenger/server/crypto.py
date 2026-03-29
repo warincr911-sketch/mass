@@ -9,7 +9,8 @@ import hmac  # ✅ compare_digest находится в hmac, не в hashlib!
 import os
 import base64  # ✅ Добавлен импорт base64
 import logging
-from typing import Optional
+
+
 
 logger = logging.getLogger(__name__)
 

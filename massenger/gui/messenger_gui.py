@@ -92,7 +92,7 @@ class GUIConstants:
 # ============================================================================
 def _sanitize_for_log(data: Dict[str, Any]) -> Dict[str, Any]:
     """Удаляет чувствительные данные перед логированием"""
-    sensitive = {'password', 'encrypted_data', 'private_key', 'encrypted_key'}
+    sensitive = {'password', 'private_key',}
     result = {}
     for k, v in data.items():
         if k in sensitive:
@@ -744,18 +744,28 @@ class MessengerGUI:
         self.load_chat_history()
 
     def display_messages(self, msgs: List[Dict[str, Any]]) -> None:
+        """Отображение списка сообщений в окне чата"""
+        if not self.messages_area:
+            return
+
         self.messages_area.config(state=tk.NORMAL)
         self.messages_area.delete(1.0, tk.END)
+
         if not msgs:
             self.messages_area.insert(tk.END, "\n📭 История пуста\n\n", "system")
         else:
             last_timestamp = ''
             file_count = 0
+
             for m in msgs:
+                # FIX 1: Извлекаем ID в начале итерации для корректной области видимости
+                msg_id = m.get('id')
+
                 ts_raw = m.get('timestamp', '')
                 ts = ts_raw[:16] if isinstance(ts_raw, str) and len(ts_raw) > 16 else str(ts_raw)
                 last_timestamp = ts_raw
 
+                # Обработка файлов
                 if m.get('is_file', False):
                     filename = m.get('filename', 'unknown')
                     file_size = m.get('file_size', 0)
@@ -764,7 +774,6 @@ class MessengerGUI:
                     is_own = m.get('is_own', False)
                     tag = "own" if is_own else "other"
                     sender_label = "Вы" if is_own else sender
-                    logger.info(f"📎 ФАЙЛ: {filename} | ID: {file_id}")
 
                     self.messages_area.insert(tk.END, f"[{ts}] {sender_label}:\n", tag)
                     self.messages_area.insert(tk.END, f"   📎 Файл: {filename}\n", tag)
@@ -777,27 +786,27 @@ class MessengerGUI:
                         self.messages_area.insert(tk.END, "   ⚠️ Файл недоступен\n", "error")
                     self.messages_area.insert(tk.END, "\n\n")
                 else:
-                    # Чужие или свои сообщения
-                    msg_id = m.get('id')  # ← ← ← ИЗВЛЕЧЬ msg_id ПЕРЕД использованием!
-
+                    # Обработка текстовых сообщений
                     if m.get('is_own', False):
-                        # Свои сообщения — проверяем с приведением типов
+                        # Свои сообщения: берем из локального кэша (plaintext)
+                        text = "🔒 Зашифрованное сообщение"  # Fallback по умолчанию
+
                         if msg_id is not None:
-                            # Пробуем найти по строковому ключу (как сохраняется при отправке)
-                            msg_id_str = str(msg_id)
-                            if msg_id_str in self.sent_messages:
-                                text = self.sent_messages[msg_id_str]
-                            elif msg_id in self.sent_messages:  # На случай, если ключ числовой
-                                text = self.sent_messages[msg_id]
+                            # FIX 2: Нормализация типа ID (строка для совместимости с кэшем)
+                            cache_key = str(msg_id)
+                            cached_text = self.sent_messages.get(cache_key)
+
+                            if cached_text:
+                                text = cached_text
                             else:
-                                text = m.get('text', m.get('encrypted_data', '🔒 Зашифрованное сообщение'))
-                                logger.debug(
-                                    f"⚠️ Сообщение не найдено в кэше: msg_id={msg_id} (type={type(msg_id).__name__})")
-                        else:
-                            text = m.get('text', m.get('encrypted_data', '🔒 Зашифрованное сообщение'))
+                                # Fallback: если кэш пуст (перезапуск), пробуем взять из ответа сервера
+                                # Примечание: при E2EE сервер не хранит plaintext, поэтому это работает только в рамках сессии
+                                text = m.get('text', m.get('encrypted_data', text))
+                                logger.debug(f"⚠️ Промах кэша для msg_id={msg_id}")
+
                         self.messages_area.insert(tk.END, f"[{ts}] Вы:\n{text}\n\n", "own")
                     else:
-                        # Чужие сообщения
+                        # Чужие сообщения: расшифровка
                         text = m.get('text', m.get('encrypted_data', ''))
                         if m.get('is_encrypted', False):
                             try:
@@ -808,7 +817,17 @@ class MessengerGUI:
                                     text = "⚠️ Нет ключа"
                             except Exception as e:
                                 text = f"⚠️ Не расшифровано: {str(e)[:50]}"
+                                logger.error(f"❌ Ошибка расшифровки: {e}")
+
                         self.messages_area.insert(tk.END, f"[{ts}] {m.get('sender')}:\n{text}\n\n", "other")
+
+                if self.current_chat and last_timestamp:
+                    self.last_message_time[self.current_chat] = last_timestamp
+
+            logger.info(f"✅ Отображено {len(msgs)} сообщений, {file_count} файлов")
+
+        self.messages_area.config(state=tk.DISABLED)
+        self.messages_area.see(tk.END)
 
     def _download_file_by_id(self, file_id: str, filename: str, sender: str) -> None:
         save_path = filedialog.asksaveasfilename(defaultextension=".*", initialfile=filename,
@@ -935,15 +954,16 @@ class MessengerGUI:
 
         threading.Thread(target=_send, daemon=True).start()
 
-    def _store_sent_message(self, message_id: str, text: str) -> None:
+    def _store_sent_message(self, message_id, text: str) -> None:
         """Сохраняет отправленный текст сообщения по его ID."""
         # Безопасная инициализация на всякий случай
         if not hasattr(self, 'sent_messages'):
             self.sent_messages = {}
-        # message_id приходит как строка (UUID), не как int
-            msg_id_str = str(message_id)
-            self.sent_messages[msg_id_str] = text
-            logger.debug(f"💾 Сообщение сохранено в кэш: msg_id={msg_id_str[:8]}...")
+
+        # ✅ КРИТИЧЕСКОЕ: нормализация ключа к строке (вне if-блока!)
+        msg_id_str = str(message_id)
+        self.sent_messages[msg_id_str] = text
+        logger.debug(f"💾 Кэш: key='{msg_id_str}' (type={type(msg_id_str).__name__}), text_len={len(text)}")
 
     def attach_file(self) -> None:
         if not self.current_chat:

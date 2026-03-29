@@ -22,8 +22,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from client.config import ClientConfig
-from client.crypto import ClientCrypto
+from massenger.client.config import ClientConfig
+from massenger.client.crypto import ClientCrypto
 
 
 # ============================================================================
@@ -99,7 +99,7 @@ class MessengerClient:
         self.crypto = ClientCrypto()
         self.connected = False
         self._receive_task: Optional[asyncio.Task] = None
-        self.sent_messages: Dict[int, str] = {}
+        self.sent_messages: Dict[str, str] = {}
 
         # Колбэки
         self.message_callback: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -345,11 +345,12 @@ class MessengerClient:
             f"🔍 send_message: encrypted_data type={type(encrypted_data)}, len={len(encrypted_data) if encrypted_data else 0}")
 
         if not self.username:
-            logger.error(f"❌ send_message: invalid recipient format: '{recipient}'")
-            logger.error(f"   Pattern: {ClientConstants.USERNAME_PATTERN}")
+            logger.error("❌ send_message: отправка без авторизации (self.username=None)")
+            return None
 
         if not self._validate_username(recipient):
-            logger.error("❌ Неверный формат получателя")
+            logger.error(f"❌ send_message: invalid recipient format: '{recipient}'")
+            logger.error(f"   Pattern: {ClientConstants.USERNAME_PATTERN}")
             return None
         if not encrypted_data:
             logger.error("❌ send_message: encrypted_data is None or empty")
@@ -381,16 +382,16 @@ class MessengerClient:
                     logger.debug(f"📥 Получен тип сообщения: {msg_type}")
 
                     # ✅ КРИТИЧЕСКОЕ: обработка ответов на запросы
-                    if 'request_id' in data:
-                        request_id = data.get('request_id')
-                        if request_id in self._pending_requests:
-                            logger.debug(f"✅ Ответ на запрос #{request_id[:8]}...")
-                            self._pending_requests[request_id].set_result(data)
-                        else:
+
+                    request_id = data.get('request_id')
+                    if request_id and request_id in self._pending_requests:
+                        self._pending_requests[request_id].set_result(data)
+                        continue
+                    else:
                             logger.warning(f"⚠️ request_id {request_id[:8]}... не найден в pending")
 
                     # Обработка событий (new_message, file_notification, etc.)
-                    elif msg_type == 'new_message':
+                    if  msg_type == 'new_message':
                         if self.message_callback:
                             asyncio.create_task(self._safe_callback(self.message_callback, data))
                     elif msg_type == 'file_notification':

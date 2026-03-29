@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 
-from server.config import Config
+from massenger.server.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class DatabaseManager:
 
     def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         """Аутентификация пользователя"""
-        from server.crypto import CryptoManager
+        from massenger.server.crypto import CryptoManager
         crypto = CryptoManager()
 
         user = self.get_user_by_username(username)
