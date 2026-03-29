@@ -10,10 +10,7 @@ import os
 import base64  # ✅ Добавлен импорт base64
 import logging
 
-
-
 logger = logging.getLogger(__name__)
-
 
 class CryptoManager:
     """Крипто-менеджер сервера"""

@@ -216,6 +216,7 @@ class MessengerGUI:
         self.username: Optional[str] = None
         self.known_public_keys: Dict[str, str] = {}
         self.sent_messages: Dict[str, str] = {}
+        self._temp_message_positions: Dict[str, str] = {}  # Для отслеживания временных ID сообщений
 
         self.chat_listbox: Optional[tk.Listbox] = None
         self.messages_area: Optional[scrolledtext.ScrolledText] = None
@@ -314,11 +315,11 @@ class MessengerGUI:
             self.root.after(0, lambda err=str(e): self.show_error(f"Ошибка: {err}"))
             return None
 
-    def _decrypt_in_thread(self, encrypted_data: str, public_key: str) -> str:
+    def _decrypt_in_thread(self, encrypted_data: str, sender_public_key: str) -> str:
         """Выполняет расшифровку в отдельном потоке, чтобы не блокировать UI"""
 
         def _decrypt():
-            return self.client.crypto.decrypt_message(encrypted_data, None)
+            return self.client.crypto.decrypt_message(encrypted_data, sender_public_key)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             future = executor.submit(_decrypt)
@@ -693,7 +694,7 @@ class MessengerGUI:
             self.root.after(0, lambda: self.refresh_contacts())
 
     def display_new_message(self, sender: str, text: str, timestamp: Optional[str] = None,
-                            status: Optional[str] = None) -> None:
+                            status: Optional[str] = None, temp_id: Optional[str] = None) -> None:
         self.messages_area.config(state=tk.NORMAL)
         ts = timestamp[:16] if timestamp and len(timestamp) > 16 else datetime.now().strftime("%H:%M")
         tag = "own" if sender == "Вы" else "other"
@@ -701,7 +702,14 @@ class MessengerGUI:
         if status:
             indicators = {"sending": " ⏳", "sent": " ✓", "delivered": " ✓✓", "read": " 👁️", "failed": " ❌"}
             message_text += indicators.get(status, "")
-        self.messages_area.insert(tk.END, f"{message_text}\n\n", tag)
+
+        # Вставляем текст и сохраняем позицию для возможного обновления
+        insert_pos = self.messages_area.insert(tk.END, f"{message_text}\n\n", tag)
+
+        # Сохраняем временный ID для последующего обновления
+        if temp_id and hasattr(self, '_temp_message_positions'):
+            self._temp_message_positions[temp_id] = insert_pos
+
         self.messages_area.config(state=tk.DISABLED)
         self.messages_area.see(tk.END)
 
@@ -789,7 +797,7 @@ class MessengerGUI:
                     # Обработка текстовых сообщений
                     if m.get('is_own', False):
                         # Свои сообщения: берем из локального кэша (plaintext)
-                        text = "🔒 Зашифрованное сообщение"  # Fallback по умолчанию
+                        text = ""
 
                         if msg_id is not None:
                             # FIX 2: Нормализация типа ID (строка для совместимости с кэшем)
@@ -801,7 +809,7 @@ class MessengerGUI:
                             else:
                                 # Fallback: если кэш пуст (перезапуск), пробуем взять из ответа сервера
                                 # Примечание: при E2EE сервер не хранит plaintext, поэтому это работает только в рамках сессии
-                                text = m.get('text', m.get('encrypted_data', text))
+                                text = m.get('text', m.get('encrypted_data', ''))
                                 logger.debug(f"⚠️ Промах кэша для msg_id={msg_id}")
 
                         self.messages_area.insert(tk.END, f"[{ts}] Вы:\n{text}\n\n", "own")
@@ -871,7 +879,12 @@ class MessengerGUI:
             return
 
         logger.info(f"📤 Отправка сообщения для {self.current_chat}")
-        self.display_new_message("Вы", text, status="sending")
+
+        # Генерируем уникальный ID для этого сообщения до отправки
+        temp_msg_id = f"temp_{time.time()}_{id(text)}"
+
+        # Отображаем сообщение с временным ID
+        self.display_new_message("Вы", text, status="sending", temp_id=temp_msg_id)
         self.message_entry.delete(0, tk.END)
 
         def _send() -> None:
@@ -931,8 +944,9 @@ class MessengerGUI:
                 if response and response.get("success"):
                     message_id = response.get("message_id")
                     if message_id:
+                        # Сохраняем в кэш для будущего использования
                         self.root.after(0, lambda: self._store_sent_message(str(message_id), text))
-                    self.root.after(0, lambda: self.display_new_message("Вы", text, status="sent"))
+
                     logger.info(f"✅ Сообщение отправлено успешно: {message_id}")
                 elif response is None:
                     logger.error("❌ send_message вернул None (таймаут или ошибка соединения)")

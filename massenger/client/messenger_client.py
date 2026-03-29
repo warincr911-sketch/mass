@@ -346,15 +346,15 @@ class MessengerClient:
 
         if not self.username:
             logger.error("❌ send_message: отправка без авторизации (self.username=None)")
-            return None
+            return False
 
         if not self._validate_username(recipient):
             logger.error(f"❌ send_message: invalid recipient format: '{recipient}'")
             logger.error(f"   Pattern: {ClientConstants.USERNAME_PATTERN}")
-            return None
+            return False
         if not encrypted_data:
             logger.error("❌ send_message: encrypted_data is None or empty")
-            return None
+            return False
 
         data = {
             'type': 'message',
